@@ -83,6 +83,7 @@
     const adhkar = DEFAULT_ADHKAR.map((a) => ({ ...a }));
     return {
       v: 1,
+      lastDate: dayKey(),
       adhkar,
       currentId: adhkar[0].id,
       counts: dict(),
@@ -128,12 +129,17 @@
     const ids = new Set(s.adhkar.map((a) => a.id));
     s.currentId = ids.has(raw.currentId) ? raw.currentId : s.adhkar[0].id;
 
+    s.lastDate = typeof raw.lastDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.lastDate) ? raw.lastDate : dayKey();
+
+    const today = dayKey();
     s.counts = dict();
-    if (raw.counts && typeof raw.counts === 'object') {
+    if (s.lastDate === today && raw.counts && typeof raw.counts === 'object') {
       for (const a of s.adhkar) {
         const c = clampInt(raw.counts[a.id], 0, a.target, 0);
         if (c) s.counts[a.id] = c;
       }
+    } else {
+      s.lastDate = today;
     }
 
     s.log = dict();
@@ -180,6 +186,17 @@
   }
 
   let state = load();
+
+  function checkNewDay() {
+    const today = dayKey();
+    if (state.lastDate !== today) {
+      state.counts = dict();
+      state.lastDate = today;
+      save();
+      if (view === 'counter') renderCounter();
+    }
+  }
+  checkNewDay();
   let saveTimer = 0;
   let saveWarned = false;
 
@@ -883,6 +900,7 @@
   }
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
+      checkNewDay();
       updateWake();
       showView(view);
     }
