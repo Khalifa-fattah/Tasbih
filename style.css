@@ -197,6 +197,7 @@ main {
   -webkit-overflow-scrolling: touch;
 }
 .view { display: flex; flex-direction: column; gap: 14px; min-height: 100%; }
+#view-counter { touch-action: pan-y; }
 
 /* ================= شاشة العدّاد ================= */
 .stats {
@@ -313,6 +314,32 @@ main {
   height: clamp(50px, 18vw, 84px);
 }
 .counter.done { animation: glow .65s ease-out; }
+.counter.auto-on {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 45%, transparent), 0 0 44px color-mix(in srgb, var(--gold) 24%, transparent), inset 0 0 34px rgba(0, 0, 0, .22);
+  animation: auto-pulse 1.8s ease-in-out infinite;
+}
+.counter .auto-badge {
+  position: relative;
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--gold) 22%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--gold) 65%, transparent);
+  color: var(--gold);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  direction: ltr;
+}
+.counter .auto-badge svg { width: 12px; height: 12px; flex: none; }
+
+@keyframes auto-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 35%, transparent), 0 0 36px color-mix(in srgb, var(--gold) 18%, transparent), inset 0 0 34px rgba(0, 0, 0, .22); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--gold) 55%, transparent), 0 0 52px color-mix(in srgb, var(--gold) 30%, transparent), inset 0 0 34px rgba(0, 0, 0, .22); }
+}
 
 @keyframes glow {
   0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--gold) 75%, transparent); }

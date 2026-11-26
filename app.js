@@ -306,8 +306,72 @@
     if (state.settings.sound) beep(700, 0.05, 0.12, 'triangle');
     if (state.settings.vibrate) vib(12);
   };
-  const doneFx = () => {
-    if (state.settings.sound) { beep(660, 0.14, 0.16); beep(880, 0.22, 0.16, 'sine', 0.14); }
+
+  /* ===================== صوت الانتقال وملف الصمت للخلفية ===================== */
+  function createWavUrl(samples, sampleRate = 8000) {
+    const buf = new ArrayBuffer(44 + samples.length * 2);
+    const v = new DataView(buf);
+    const writeStr = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i)); };
+    writeStr(0, 'RIFF');
+    v.setUint32(4, 36 + samples.length * 2, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true);
+    v.setUint16(22, 1, true);
+    v.setUint32(24, sampleRate, true);
+    v.setUint32(28, sampleRate * 2, true);
+    v.setUint16(32, 2, true);
+    v.setUint16(34, 16, true);
+    writeStr(36, 'data');
+    v.setUint32(40, samples.length * 2, true);
+    for (let i = 0; i < samples.length; i++) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+    return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  }
+
+  let silentAudio = null;
+  let chimeAudio = null;
+  function ensureMediaAudio() {
+    if (!silentAudio) {
+      silentAudio = new Audio(createWavUrl(new Float32Array(8000)));
+      silentAudio.loop = true;
+      silentAudio.preload = 'auto';
+    }
+    if (!chimeAudio) {
+      const sr = 16000;
+      const len = Math.floor(sr * 0.42);
+      const samples = new Float32Array(len);
+      for (let i = 0; i < len; i++) {
+        const t = i / sr;
+        if (t < 0.14) {
+          const env = Math.min(1, t / 0.01) * Math.exp(-t * 14);
+          samples[i] = Math.sin(2 * Math.PI * 660 * t) * 0.28 * env;
+        } else {
+          const dt = t - 0.14;
+          const env = Math.min(1, dt / 0.01) * Math.exp(-dt * 10);
+          samples[i] = Math.sin(2 * Math.PI * 880 * dt) * 0.32 * env;
+        }
+      }
+      chimeAudio = new Audio(createWavUrl(samples, sr));
+      chimeAudio.preload = 'auto';
+    }
+  }
+
+  const doneFx = (forceSound = false) => {
+    if (forceSound) {
+      ensureMediaAudio();
+      try {
+        chimeAudio.currentTime = 0;
+        chimeAudio.play().catch(() => { beep(660, 0.14, 0.16); beep(880, 0.22, 0.16, 'sine', 0.14); });
+      } catch (e) {
+        beep(660, 0.14, 0.16); beep(880, 0.22, 0.16, 'sine', 0.14);
+      }
+    } else if (state.settings.sound) {
+      beep(660, 0.14, 0.16); beep(880, 0.22, 0.16, 'sine', 0.14);
+    }
     if (state.settings.vibrate) vib([70, 50, 110]);
   };
 
@@ -406,7 +470,7 @@
     );
   }
 
-  function tap() {
+  function tap(isAuto = false) {
     const a = cur();
     let c = (state.counts[a.id] || 0) + 1;
     state.counts[a.id] = c;
@@ -414,7 +478,7 @@
 
     const isTargetHit = c > 0 && c % a.target === 0;
     if (isTargetHit) {
-      doneFx();
+      doneFx(isAuto);
       el.counter.classList.remove('done');
       void el.counter.offsetWidth;
       el.counter.classList.add('done');
@@ -431,10 +495,10 @@
           checkEl.hidden = true;
           numEl.style.opacity = '1';
           ofEl.style.opacity = '1';
-          if (state.settings.auto) advance();
+          if (state.settings.auto || isAuto) advance();
         }, 500);
       } else {
-        if (state.settings.auto) advance();
+        if (state.settings.auto || isAuto) advance();
       }
     } else {
       tickFx();
@@ -442,6 +506,7 @@
     pulse();
     renderCounter();
     save();
+    return isTargetHit;
   }
 
   function advance() {
@@ -454,6 +519,7 @@
     if (n > 1 && i === n - 1) toast('أتممت جميع الأذكار، بارك الله فيك');
     else if (n > 1) toast(`التالي: ${next.text}`);
     renderCounter();
+    updateMediaSession();
     save();
   }
 
@@ -465,22 +531,188 @@
     const nextIndex = (i + direction + n) % n;
     state.currentId = state.adhkar[nextIndex].id;
     renderCounter();
+    updateMediaSession();
     save();
+  }
+
+  /* ===================== العدّ التلقائي + مشغّل الوسائط ===================== */
+  let autoActive = false;
+  let autoTimer = 0;
+
+  function estimateDhikrMs(text) {
+    const clean = (text || '').replace(/[\u064B-\u065F\u0670\u06D6-\u06ED]/g, '').trim();
+    if (!clean) return 1500;
+    const words = clean.split(/\s+/).filter(Boolean).length;
+    const chars = clean.replace(/\s+/g, '').length;
+    return Math.min(6500, Math.max(1100, Math.round(450 + words * 320 + chars * 55)));
+  }
+
+  function updateMediaSession() {
+    if (!('mediaSession' in navigator)) return;
+    try {
+      const a = cur();
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: a.text,
+        artist: 'تَسْبِيح — العدّ التلقائي',
+        album: 'مسبحة الأذكار'
+      });
+      navigator.mediaSession.playbackState = autoActive ? 'playing' : 'paused';
+    } catch (e) { /* ignore */ }
+  }
+
+  function scheduleAutoStep(extraDelay = 0) {
+    clearTimeout(autoTimer);
+    if (!autoActive) return;
+    const delay = estimateDhikrMs(cur().text) + extraDelay;
+    autoTimer = setTimeout(() => {
+      if (!autoActive) return;
+      const hit = tap(true);
+      scheduleAutoStep(hit ? 550 : 0);
+    }, delay);
+  }
+
+  function startAutoCount() {
+    if (autoActive) return;
+    autoActive = true;
+    ensureMediaAudio();
+    try { silentAudio.play().catch(() => {}); } catch (e) { /* ignore */ }
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.setActionHandler('play', startAutoCount);
+        navigator.mediaSession.setActionHandler('pause', stopAutoCount);
+        navigator.mediaSession.setActionHandler('stop', stopAutoCount);
+        navigator.mediaSession.setActionHandler('nexttrack', () => navigateDhikr(1));
+        navigator.mediaSession.setActionHandler('previoustrack', () => navigateDhikr(-1));
+      } catch (e) { /* ignore */ }
+    }
+    updateMediaSession();
+    el.counter.classList.add('auto-on');
+    const badge = $('#autoBadge');
+    if (badge) badge.hidden = false;
+    vib(35);
+    updateWake();
+    const hit = tap(true);
+    scheduleAutoStep(hit ? 550 : 0);
+  }
+
+  function stopAutoCount() {
+    if (!autoActive) return;
+    autoActive = false;
+    clearTimeout(autoTimer);
+    autoTimer = 0;
+    if (silentAudio) {
+      try { silentAudio.pause(); } catch (e) { /* ignore */ }
+    }
+    if ('mediaSession' in navigator) {
+      try { navigator.mediaSession.playbackState = 'paused'; } catch (e) { /* ignore */ }
+    }
+    el.counter.classList.remove('auto-on');
+    const badge = $('#autoBadge');
+    if (badge) badge.hidden = true;
+    updateWake();
   }
 
   el.prev.addEventListener('click', () => navigateDhikr(-1));
   el.next.addEventListener('click', () => navigateDhikr(1));
 
+  let holdTimer = 0;
+  let pressPid = null;
+  let pressX = 0;
+  let pressY = 0;
+  let longPressed = false;
+  let pressCancelled = false;
+  let justStoppedAuto = false;
+
   el.counter.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.preventDefault();
-    tap();
+    if (autoActive) {
+      stopAutoCount();
+      justStoppedAuto = true;
+      vib(15);
+      return;
+    }
+    justStoppedAuto = false;
+    pressPid = e.pointerId;
+    pressX = e.clientX;
+    pressY = e.clientY;
+    longPressed = false;
+    pressCancelled = false;
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(() => {
+      holdTimer = 0;
+      if (!pressCancelled) {
+        longPressed = true;
+        startAutoCount();
+      }
+    }, 500);
+  });
+  el.counter.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== pressPid || pressCancelled) return;
+    if (Math.hypot(e.clientX - pressX, e.clientY - pressY) > 14) {
+      pressCancelled = true;
+      clearTimeout(holdTimer);
+      holdTimer = 0;
+    }
+  });
+  const endCounterPress = (e) => {
+    if (justStoppedAuto) {
+      justStoppedAuto = false;
+      return;
+    }
+    if (e.pointerId !== pressPid) return;
+    clearTimeout(holdTimer);
+    holdTimer = 0;
+    if (!longPressed && !pressCancelled && e.type === 'pointerup') {
+      tap();
+    }
+    pressPid = null;
+  };
+  el.counter.addEventListener('pointerup', endCounterPress);
+  el.counter.addEventListener('pointercancel', (e) => {
+    if (e.pointerId !== pressPid) return;
+    clearTimeout(holdTimer);
+    holdTimer = 0;
+    pressCancelled = true;
+    pressPid = null;
   });
   el.counter.addEventListener('keydown', (e) => {
-    if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); tap(); }
+    if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
+      e.preventDefault();
+      if (autoActive) stopAutoCount();
+      else tap();
+    }
   });
   el.counter.addEventListener('click', (e) => e.preventDefault());
   el.counter.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  /* ===================== السحب بين الأذكار ===================== */
+  const viewCounter = $('#view-counter');
+  let swipePid = null;
+  let swipeX = 0;
+  let swipeY = 0;
+  let suppressCardClickUntil = 0;
+
+  viewCounter.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (e.target.closest && e.target.closest('.pill, .dhikr-nav')) return;
+    swipePid = e.pointerId;
+    swipeX = e.clientX;
+    swipeY = e.clientY;
+  });
+  viewCounter.addEventListener('pointerup', (e) => {
+    if (e.pointerId !== swipePid) return;
+    swipePid = null;
+    const dx = e.clientX - swipeX;
+    const dy = e.clientY - swipeY;
+    if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.35) {
+      suppressCardClickUntil = Date.now() + 350;
+      navigateDhikr(dx < 0 ? 1 : -1);
+    }
+  });
+  viewCounter.addEventListener('pointercancel', (e) => {
+    if (e.pointerId === swipePid) swipePid = null;
+  });
 
   el.undo.addEventListener('click', () => {
     const a = cur();
@@ -672,7 +904,10 @@
   });
 
   $('#btnAddDhikr').addEventListener('click', () => openEdit(null));
-  el.card.addEventListener('click', openAdhkar);
+  el.card.addEventListener('click', () => {
+    if (Date.now() < suppressCardClickUntil) return;
+    openAdhkar();
+  });
 
   /* ===================== شاشة الخطط ===================== */
   function updateDhikrTarget(id, newTarget) {
@@ -888,7 +1123,7 @@
   let wakeLock = null;
   async function updateWake() {
     try {
-      const want = state.settings.wake && 'wakeLock' in navigator && document.visibilityState === 'visible';
+      const want = (state.settings.wake || autoActive) && 'wakeLock' in navigator && document.visibilityState === 'visible';
       if (want && !wakeLock) {
         wakeLock = await navigator.wakeLock.request('screen');
         wakeLock.addEventListener('release', () => { wakeLock = null; });
