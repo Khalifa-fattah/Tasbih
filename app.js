@@ -438,6 +438,9 @@
     const a = cur();
     const totalC = state.counts[a.id] || 0;
 
+    const todayLog = state.log[dayKey()] || dict();
+    const isComplete = (todayLog[a.id] || 0) >= a.target;
+
     el.ar.textContent = a.text;
     el.tr.textContent = a.translit;
     el.tr.hidden = !a.translit;
@@ -450,6 +453,7 @@
     const ringProgress = totalC === 0 ? 0 : ((totalC % a.target || a.target) / a.target);
     el.ring.style.strokeDashoffset = String(1 - ringProgress);
     el.ring.style.opacity = totalC > 0 ? '1' : '0';
+    el.counter.classList.toggle('complete', isComplete);
     el.undo.disabled = totalC <= 0;
 
     $('#stStreak').textContent = streak();
@@ -969,8 +973,17 @@
     }));
   }
 
+  /* إجمالي كل ذكر عبر التاريخ */
+  function getHistoricalTotal(id) {
+    let total = 0;
+    for (const k in state.log) {
+      if (state.log[k][id]) total += state.log[k][id];
+    }
+    return total;
+  }
+
   /* ===================== شاشة السجل ===================== */
-  let logY = null, logM = null, logSel = null;
+  let logY = null, logM = null, logSel = null, showHistorical = false;
 
   function renderLog() {
     const now = new Date();
@@ -1003,15 +1016,38 @@
         class: `day lv${lv}${key === todayKey ? ' today' : ''}${key === logSel ? ' sel' : ''}`,
         disabled: future,
         'aria-label': `${fmtFull.format(parseKey(key))}: ${total}`,
-        onclick: () => { logSel = key; renderLog(); }
+        onclick: () => { logSel = key; showHistorical = false; renderLog(); }
       }, String(d)));
     }
     $('#cal').replaceChildren(...cells);
 
     const detail = $('#dayDetail');
     const selTotal = logSel ? dayTotal(logSel) : 0;
-    const parts = [h('h3', { class: 'detail-title', text: logSel ? fmtFull.format(parseKey(logSel)) : 'اختر يومًا' })];
-    if (!selTotal) {
+    
+    const statsIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    statsIcon.setAttribute('viewBox', '0 0 24 24');
+    statsIcon.setAttribute('width', '20');
+    statsIcon.setAttribute('height', '20');
+    statsIcon.style.stroke = 'currentColor';
+    statsIcon.style.strokeWidth = '2';
+    statsIcon.style.fill = 'none';
+    statsIcon.innerHTML = '<path d="M18 20V10M12 20V4M6 20v-6"/>';
+
+    const header = h('div', { style: 'display:flex; align-items:center; justify-content:space-between; margin-bottom:4px' },
+        h('h3', { class: 'detail-title', text: showHistorical ? 'الإجمالي التاريخي لكل الأذكار' : (logSel ? fmtFull.format(parseKey(logSel)) : 'اختر يومًا') }),
+        h('button', {
+            type: 'button', class: 'icon-btn sm', 'aria-label': 'تبديل الإحصائيات',
+            onclick: () => { showHistorical = !showHistorical; renderLog(); }
+        }, statsIcon)
+    );
+
+    const parts = [header];
+    
+    if (showHistorical) {
+        parts.push(h('ul', { class: 'list' }, state.adhkar.map((a) => 
+            h('li', {}, h('span', { class: 'nm', text: a.text }), h('span', { class: 'ct', text: fmtShort(getHistoricalTotal(a.id)) }))
+        )));
+    } else if (!selTotal) {
       parts.push(h('p', { class: 'muted', style: 'margin:4px 0 0', text: 'لا يوجد تسبيح مسجّل في هذا اليوم.' }));
     } else {
       parts.push(h('div', { class: 'detail-total', text: fmt(selTotal) }));

@@ -54,6 +54,8 @@
   --gold: #dcb743;
   --gold-dim: #7b5d08;
   --on-gold: #1b1405;
+  --success-track: #064e3b;
+  --success-prog: #10b981;
   --danger: #e58b7b;
   --shadow: 0 12px 34px rgba(0, 0, 0, .45);
   --font: "Cairo", system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif;
@@ -84,6 +86,8 @@
   --gold: #a57c0c;
   --gold-dim: #dcc98f;
   --on-gold: #ffffff;
+  --success-track: #14532d;
+  --success-prog: #22c55e;
   --danger: #b3412f;
   --shadow: 0 12px 34px rgba(60, 50, 20, .2);
   color-scheme: light;
@@ -185,7 +189,13 @@ button { font: inherit; color: inherit; }
 }
 .icon-btn svg { width: 26px; height: 26px; }
 .icon-btn:disabled { opacity: .3; cursor: default; }
-.icon-btn.sm { width: 38px; height: 38px; }
+.icon-btn.sm { 
+    width: 38px; height: 38px; 
+    border-radius: 8px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
 .icon-btn.sm svg { width: 20px; height: 20px; }
 .icon-btn.danger { color: var(--danger); }
 
@@ -299,7 +309,11 @@ main {
 .ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); pointer-events: none; overflow: visible; }
 .ring circle { fill: none; stroke-width: 3.2; }
 .ring-track { stroke: var(--gold-dim); }
-.ring-prog { stroke: var(--gold); stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset .16s ease-out; }
+.ring-prog { stroke: var(--gold); stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset .16s ease-out, stroke .3s ease; }
+.counter.complete .ring-prog { stroke: var(--success-prog); }
+.ring-track { stroke: var(--gold-dim); transition: stroke .3s ease; }
+.counter.complete .ring-track { stroke: var(--success-track); }
+.counter.complete .check-icon { color: var(--success-prog); }
 .counter .num { position: relative; font-family: var(--font-num); font-size: clamp(60px, 22vw, 108px); line-height: 1.1; transition: opacity .15s; }
 .counter .of { position: relative; color: var(--muted); font-size: clamp(20px, 6vw, 28px); transition: opacity .15s; }
 .counter .check-icon {
